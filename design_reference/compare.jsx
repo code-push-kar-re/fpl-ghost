@@ -1,44 +1,121 @@
 // Compare view — side-by-side pitches + win probability + player-by-player diff
 
-function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseyStyle }) {
-  const myProj = calculateProjection(mySquad);
-  const rivalProj = calculateProjection(rivalSquad);
-  const delta = myProj - rivalProj;
-  const winProb = calculateWinProb(myProj, rivalProj, 15.2, 16.8);
-
-  const shared = [];
-  const myOnly = [];
-  const rivalOnly = [];
-  mySquad.slice(0, 11).forEach(p => {
-    const inRival = rivalSquad.slice(0, 11).find(r => r.id === p.id);
-    if (inRival) shared.push(p);
-    else myOnly.push(p);
+// Returns a version of squad with proj/captain adjusted for a given GW and optimal lineup
+function _squadForGw(squad, gw, optimal) {
+  if (!gw || !optimal) return squad;
+  const xiIds   = new Set(optimal.xiIds || []);
+  const capId   = optimal.captainId;
+  const viceId  = optimal.viceId;
+  return squad.map(p => {
+    const gwEntry = (p.xpByGw || []).find(g => g.gw === gw);
+    return {
+      ...p,
+      proj:    gwEntry ? gwEntry.xp : p.proj,
+      captain: p.id === capId,
+      vice:    p.id === viceId,
+      _inXi:   xiIds.size ? xiIds.has(p.id) : p.startIdx < 11,
+    };
+  }).sort((a, b) => {
+    // Keep bench at back
+    if (a._inXi !== b._inXi) return a._inXi ? -1 : 1;
+    return a.startIdx - b.startIdx;
   });
-  rivalSquad.slice(0, 11).forEach(r => {
-    if (!mySquad.slice(0, 11).find(p => p.id === r.id)) rivalOnly.push(r);
+}
+
+function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseyStyle }) {
+  const nextGw     = window.FPL_STATE?.nextGw || 1;
+  const optimalMap = window.FPL_STATE?.optimalByGw || {};
+  const gws        = Object.keys(optimalMap).map(Number).sort((a,b)=>a-b);
+  // Fall back to next 5 GWs if optimizer didn't run
+  const gwList     = gws.length ? gws : Array.from({length:5}, (_,i) => nextGw + i);
+
+  const [selectedGw, setSelectedGw] = React.useState(gwList[0] || nextGw);
+
+  const optimal    = optimalMap[selectedGw];
+  const mySquadGw  = _squadForGw(mySquad, selectedGw, optimal);
+  // Rival uses raw xpByGw (no optimizer — we don't know their squad strategy)
+  const rivalSquadGw = _squadForGw(rivalSquad, selectedGw, null);
+
+  const myProj    = calculateProjectionGw(mySquadGw, selectedGw, optimal);
+  const rivalProj = calculateProjectionGw(rivalSquadGw, selectedGw, null);
+  const delta     = myProj - rivalProj;
+  const winProb   = calculateWinProb(myProj, rivalProj, 15.2, 16.8);
+
+  const shared = [], myOnly = [], rivalOnly = [];
+  mySquadGw.slice(0, 11).forEach(p => {
+    const inRival = rivalSquadGw.slice(0, 11).find(r => r.id === p.id);
+    if (inRival) shared.push(p); else myOnly.push(p);
+  });
+  rivalSquadGw.slice(0, 11).forEach(r => {
+    if (!mySquadGw.slice(0, 11).find(p => p.id === r.id)) rivalOnly.push(r);
   });
 
   return (
     <div style={{ padding: '20px 24px 40px' }}>
+      {/* GW Selector tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {gwList.map(gw => {
+          const opt = optimalMap[gw];
+          const active = gw === selectedGw;
+          return (
+            <button
+              key={gw}
+              onClick={() => setSelectedGw(gw)}
+              style={{
+                padding: '8px 18px',
+                borderRadius: 20,
+                border: active ? 'none' : '1px solid rgba(60,45,68,0.15)',
+                background: active ? '#6b3553' : '#FDFAF4',
+                color: active ? '#fff' : '#6b5a72',
+                fontFamily: 'Inter, sans-serif',
+                fontSize: 13,
+                fontWeight: active ? 600 : 400,
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+                transition: 'all 0.15s',
+              }}
+            >
+              <span>GW{gw}</span>
+              {opt && (
+                <span style={{ fontSize: 10, opacity: 0.8 }}>{opt.totalXp.toFixed(0)} xP</span>
+              )}
+            </button>
+          );
+        })}
+        {optimal && (
+          <div style={{
+            marginLeft: 'auto', alignSelf: 'center',
+            fontSize: 12, color: '#6b5a72',
+            background: 'rgba(107,53,83,0.08)',
+            borderRadius: 8, padding: '6px 12px',
+          }}>
+            ⚡ Auto: <strong>{optimal.captainName}</strong> captains
+          </div>
+        )}
+      </div>
       {/* Header — Win probability hero */}
       <WinProbabilityHero
         myProj={myProj}
         rivalProj={rivalProj}
         delta={delta}
         winProb={winProb}
+        gw={selectedGw}
       />
 
       {/* Live transfer simulator */}
       <window.CompareSimulator
-        mySquad={mySquad}
+        mySquad={mySquadGw}
         setMySquad={setMySquad}
-        rivalSquad={rivalSquad}
+        rivalSquad={rivalSquadGw}
         jerseyStyle={jerseyStyle}
       />
 
       {/* Status alert if flags present */}
       <div style={{ marginTop: 16 }}>
-        <window.StatusAlertBanner squad={mySquad} />
+        <window.StatusAlertBanner squad={mySquadGw} />
       </div>
 
       {/* Two pitches side-by-side */}
@@ -90,7 +167,7 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
               flexShrink: 0,
             }}>{myProj.toFixed(1)}<span style={{ fontSize: 14, color: '#8a7a90', marginLeft: 6 }}>pts</span></div>
           </div>
-          <PitchView squad={mySquad} setSquad={setMySquad} jerseyStyle={jerseyStyle} compact showSubtitle={false} />
+          <PitchView squad={mySquadGw} setSquad={setMySquad} jerseyStyle={jerseyStyle} compact showSubtitle={false} />
         </div>
         <div style={{
           background: '#FDFAF4',
@@ -133,7 +210,7 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
               lineHeight: 1,
             }}>{rivalProj.toFixed(1)}<span style={{ fontSize: 14, color: '#8a7a90', marginLeft: 6 }}>pts</span></div>
           </div>
-          <PitchView squad={rivalSquad} setSquad={setRivalSquad} jerseyStyle={jerseyStyle} compact showSubtitle={false} interactive={false} />
+          <PitchView squad={rivalSquadGw} setSquad={setRivalSquad} jerseyStyle={jerseyStyle} compact showSubtitle={false} interactive={false} />
         </div>
       </div>
 
@@ -177,13 +254,16 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
         </div>
       </div>
 
+      {/* Model calibration panel */}
+      <CalibrationPanel />
+
       {/* 5-GW Horizon */}
       <div style={{ marginTop: 32 }}>
         <h3 style={{
           fontFamily: "'Instrument Serif', serif",
           fontSize: 26, fontWeight: 400, color: '#3a2d44', margin: '0 0 14px',
         }}>5-gameweek outlook</h3>
-        <GwHorizonChart mySquad={mySquad} rivalSquad={rivalSquad} />
+        <GwHorizonChart mySquad={mySquad} rivalSquad={rivalSquad} selectedGw={selectedGw} optimalMap={optimalMap} />
       </div>
 
       {/* Projection distributions */}
@@ -206,7 +286,7 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
   );
 }
 
-function WinProbabilityHero({ myProj, rivalProj, delta, winProb }) {
+function WinProbabilityHero({ myProj, rivalProj, delta, winProb, gw }) {
   const positive = delta >= 0;
   return (
     <div style={{
@@ -219,7 +299,7 @@ function WinProbabilityHero({ myProj, rivalProj, delta, winProb }) {
       border: '1px solid rgba(60, 45, 68, 0.08)',
     }}>
       <StatCell
-        label="Win probability"
+        label={gw ? `GW${gw} win probability` : 'Win probability'}
         value={`${(winProb * 100).toFixed(1)}%`}
         big
         accent
@@ -447,12 +527,14 @@ function Pctile({ label, value }) {
   );
 }
 
-function GwHorizonChart({ mySquad, rivalSquad }) {
+function GwHorizonChart({ mySquad, rivalSquad, selectedGw, optimalMap }) {
   const gws = (mySquad[0]?.xpByGw || []).map(g => g.gw);
   if (!gws.length) return null;
 
   const myGwTotals = gws.map(gw => {
-    return mySquad.slice(0, 11).reduce((sum, p) => {
+    const opt   = optimalMap?.[gw];
+    const squad = _squadForGw(mySquad, gw, opt);
+    return squad.slice(0, 11).reduce((sum, p) => {
       const entry = (p.xpByGw || []).find(g => g.gw === gw);
       const xp = entry ? entry.xp : 0;
       return sum + (p.captain ? xp * 2 : xp);
@@ -501,8 +583,12 @@ function GwHorizonChart({ mySquad, rivalSquad }) {
           const myH = Math.max(4, (myGwTotals[i] / maxVal) * 90);
           const rivH = Math.max(4, (rivalGwTotals[i] / maxVal) * 90);
           const myWins = myGwTotals[i] >= rivalGwTotals[i];
+          const isSelected = gw === selectedGw;
           return (
-            <div key={gw} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div key={gw} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              background: isSelected ? 'rgba(107,53,83,0.06)' : 'transparent',
+              borderRadius: 8, padding: '4px 2px 0',
+            }}>
               <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', width: '100%' }}>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                   <span style={{ fontSize: 9, color: '#6b3553', fontWeight: 600 }}>{myGwTotals[i].toFixed(0)}</span>
@@ -513,7 +599,7 @@ function GwHorizonChart({ mySquad, rivalSquad }) {
                   <div style={{ width: '100%', height: rivH, background: !myWins ? '#c97a54' : 'rgba(201,122,84,0.3)', borderRadius: '3px 3px 0 0' }} />
                 </div>
               </div>
-              <div style={{ fontSize: 10, color: '#9b8aa1', letterSpacing: 0.2, textAlign: 'center' }}>
+              <div style={{ fontSize: 10, color: isSelected ? '#6b3553' : '#9b8aa1', fontWeight: isSelected ? 600 : 400, letterSpacing: 0.2, textAlign: 'center' }}>
                 GW{gw}{myGwTotals[i] === 0 && rivalGwTotals[i] === 0 ? ' ✕' : ''}
               </div>
             </div>
@@ -528,12 +614,83 @@ function GwHorizonChart({ mySquad, rivalSquad }) {
 }
 
 // --- helpers ---
+
+// Original projection helper (uses current proj field)
 function calculateProjection(squad) {
-  const starters = squad.slice(0, 11);
-  return starters.reduce((sum, p) => {
-    const mult = p.captain ? 2 : 1;
-    return sum + p.proj * mult;
+  return squad.slice(0, 11).reduce((sum, p) => sum + p.proj * (p.captain ? 2 : 1), 0);
+}
+
+// GW-aware projection: uses xpByGw for the selected GW
+function calculateProjectionGw(squad, gw, optimal) {
+  const xi = optimal ? squad.filter(p => (optimal.xiIds || []).includes(p.id)) : squad.slice(0, 11);
+  return xi.reduce((sum, p) => {
+    const entry = (p.xpByGw || []).find(g => g.gw === gw);
+    const xp = entry ? entry.xp : p.proj;
+    return sum + xp * (p.captain ? 2 : 1);
   }, 0);
+}
+
+function CalibrationPanel() {
+  const cal = window.FPL_STATE?.calibration;
+  if (!cal || !cal.length) return null;
+  const mae = cal.reduce((s, r) => s + Math.abs(r.diff), 0) / cal.length;
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14 }}>
+        <h3 style={{
+          fontFamily: "'Instrument Serif', serif",
+          fontSize: 26, fontWeight: 400, color: '#3a2d44', margin: 0,
+        }}>Model calibration</h3>
+        <div style={{ fontSize: 12, color: '#8a7a90' }}>
+          Our xP vs FPL's official estimate · your squad only · MAE {mae.toFixed(2)} pts
+        </div>
+      </div>
+      <div style={{
+        background: '#FDFAF4', border: '1px solid rgba(60,45,68,0.08)',
+        borderRadius: 12, overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 80px 80px 80px',
+          padding: '8px 16px', borderBottom: '1px solid rgba(60,45,68,0.08)',
+          fontSize: 11, color: '#7a6278', fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase',
+        }}>
+          <span>Player</span>
+          <span style={{ textAlign: 'right' }}>Our xP</span>
+          <span style={{ textAlign: 'right' }}>FPL est.</span>
+          <span style={{ textAlign: 'right' }}>Diff</span>
+        </div>
+        {cal.map((r, i) => (
+          <div key={i} style={{
+            display: 'grid', gridTemplateColumns: '1fr 80px 80px 80px',
+            padding: '9px 16px', borderBottom: '1px solid rgba(60,45,68,0.04)',
+            background: i % 2 === 0 ? 'transparent' : 'rgba(60,45,68,0.015)',
+            alignItems: 'center',
+          }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 500, color: '#2a2230' }}>{r.name}</span>
+              <span style={{ fontSize: 11, color: '#9b8aa1', marginLeft: 8 }}>{r.pos}</span>
+            </div>
+            <div style={{ textAlign: 'right', fontFamily: "'Instrument Serif', serif", fontSize: 16, color: '#2a2230' }}>
+              {r.our_xp.toFixed(1)}
+            </div>
+            <div style={{ textAlign: 'right', fontFamily: "'Instrument Serif', serif", fontSize: 16, color: '#6b5a72' }}>
+              {r.fpl_ep.toFixed(1)}
+            </div>
+            <div style={{
+              textAlign: 'right', fontSize: 12, fontWeight: 600,
+              color: r.diff > 0.5 ? '#4a7a4a' : r.diff < -0.5 ? '#b85a4e' : '#8a7a90',
+            }}>
+              {r.diff > 0 ? '+' : ''}{r.diff.toFixed(1)}
+            </div>
+          </div>
+        ))}
+        <div style={{ padding: '10px 16px', fontSize: 11, color: '#9b8aa1' }}>
+          Positive diff = our model is more optimistic than FPL's estimate.
+          FPL's estimate uses a proprietary model updated weekly.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function calculateWinProb(myMean, rivalMean, myStd, rivalStd) {

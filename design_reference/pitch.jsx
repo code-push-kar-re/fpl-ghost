@@ -191,14 +191,48 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
               <div style={{ fontSize: 14, fontWeight: 500, color: '#2a2230' }}>£ 0.5</div>
             </div>
           </div>
-          <div style={{
-            fontFamily: "'Instrument Serif', serif",
-            fontSize: 36,
-            color: '#3a2d44',
-            lineHeight: 1,
-            letterSpacing: -0.5,
-          }}>
-            {title}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Auto-captain button */}
+            {interactive && (() => {
+              const nextGw  = window.FPL_STATE?.nextGw;
+              const optimal = window.FPL_STATE?.optimalByGw?.[nextGw];
+              if (!optimal) return null;
+              const autoCap = () => setCaptain(optimal.captainId);
+              const currentCap = squad.find(p => p.captain);
+              const alreadySet = currentCap?.id === optimal.captainId;
+              return (
+                <button
+                  onClick={autoCap}
+                  title={`Auto: ${optimal.captainName} (highest xP)`}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: 16,
+                    border: 'none',
+                    background: alreadySet ? 'rgba(74,122,74,0.15)' : 'rgba(107,53,83,0.12)',
+                    color: alreadySet ? '#4a7a4a' : '#6b3553',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: alreadySet ? 'default' : 'pointer',
+                    fontFamily: 'Inter, sans-serif',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <span>⚡</span>
+                  <span>{alreadySet ? `${optimal.captainName} ✓` : `Auto: ${optimal.captainName}`}</span>
+                </button>
+              );
+            })()}
+            <div style={{
+              fontFamily: "'Instrument Serif', serif",
+              fontSize: 36,
+              color: '#3a2d44',
+              lineHeight: 1,
+              letterSpacing: -0.5,
+            }}>
+              {title}
+            </div>
           </div>
         </div>
       )}
