@@ -254,6 +254,9 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
         </div>
       </div>
 
+      {/* GW accuracy backtest */}
+      <AccuracyPanel />
+
       {/* Model calibration panel */}
       <CalibrationPanel />
 
@@ -703,6 +706,152 @@ function calculateWinProb(myMean, rivalMean, myStd, rivalStd) {
   const d = 0.3989422804 * Math.exp(-0.5 * z * z);
   const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
   return z > 0 ? 1 - p : p;
+}
+
+function AccuracyPanel() {
+  const rows = window.FPL_STATE?.gwAccuracy;
+  const gw   = window.FPL_STATE?.backtestGw;
+  if (!rows || !rows.length) return null;
+
+  const played   = rows.filter(r => r.minutes > 0 || r.actual > 0);
+  const mae      = played.length
+    ? played.reduce((s, r) => s + Math.abs(r.error), 0) / played.length
+    : 0;
+  const rmse     = played.length
+    ? Math.sqrt(played.reduce((s, r) => s + r.error * r.error, 0) / played.length)
+    : 0;
+  const overPreds  = played.filter(r => r.error > 1).length;
+  const underPreds = played.filter(r => r.error < -1).length;
+  const accurate   = played.length - overPreds - underPreds;
+
+  const maxActual = Math.max(...rows.map(r => r.actual), 1);
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+        <h3 style={{
+          fontFamily: "'Instrument Serif', serif",
+          fontSize: 26, fontWeight: 400, color: '#3a2d44', margin: 0,
+        }}>GW{gw} accuracy check</h3>
+        <div style={{ fontSize: 12, color: '#8a7a90', flex: 1 }}>
+          Predicted (using only pre-GW{gw} data) vs actual points scored · your squad
+        </div>
+      </div>
+
+      {/* Summary stats row */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 1, background: 'rgba(60,45,68,0.08)',
+        borderRadius: 12, overflow: 'hidden', marginBottom: 16,
+        border: '1px solid rgba(60,45,68,0.08)',
+      }}>
+        {[
+          { label: 'Mean abs. error', value: mae.toFixed(2) + ' pts', sub: 'lower = better' },
+          { label: 'RMSE', value: rmse.toFixed(2) + ' pts', sub: 'penalises big misses' },
+          { label: 'Over-predicted', value: overPreds, sub: `by >1 pt` },
+          { label: 'Under-predicted', value: underPreds, sub: `by >1 pt` },
+        ].map(s => (
+          <div key={s.label} style={{ background: '#FDFAF4', padding: '14px 18px' }}>
+            <div style={{ fontSize: 11, color: '#7a6278', letterSpacing: 0.4, textTransform: 'uppercase', fontWeight: 500 }}>{s.label}</div>
+            <div style={{ fontFamily: "'Instrument Serif', serif", fontSize: 30, color: '#2a1a30', lineHeight: 1.1, marginTop: 4 }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: '#9b8aa1', marginTop: 4 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Player rows */}
+      <div style={{
+        background: '#FDFAF4', border: '1px solid rgba(60,45,68,0.08)',
+        borderRadius: 12, overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 40px 90px 90px 80px',
+          padding: '8px 16px',
+          borderBottom: '1px solid rgba(60,45,68,0.08)',
+          fontSize: 11, color: '#7a6278', fontWeight: 600,
+          letterSpacing: 0.4, textTransform: 'uppercase',
+        }}>
+          <span>Player</span>
+          <span style={{ textAlign: 'center' }}>Fix</span>
+          <span style={{ textAlign: 'right' }}>Predicted</span>
+          <span style={{ textAlign: 'right' }}>Actual</span>
+          <span style={{ textAlign: 'right' }}>Error</span>
+        </div>
+
+        {rows.map((r, i) => {
+          const errColor = Math.abs(r.error) <= 1 ? '#4a7a4a'
+            : r.error > 0 ? '#b85a4e' : '#c97a54';
+          const barPct = (r.actual / maxActual) * 100;
+          return (
+            <div key={i} style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 40px 90px 90px 80px',
+              padding: '9px 16px',
+              borderBottom: '1px solid rgba(60,45,68,0.04)',
+              background: i % 2 === 0 ? 'transparent' : 'rgba(60,45,68,0.015)',
+              alignItems: 'center',
+            }}>
+              {/* Name + bar */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#2a2230' }}>{r.name}</span>
+                  <span style={{ fontSize: 10, color: '#9b8aa1' }}>{r.pos} · {r.club}</span>
+                  {r.dgw && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, color: '#6b3553',
+                      background: 'rgba(107,53,83,0.1)', borderRadius: 4, padding: '1px 5px',
+                    }}>DGW</span>
+                  )}
+                  {r.minutes === 0 && (
+                    <span style={{
+                      fontSize: 9, color: '#9b8aa1',
+                      background: 'rgba(60,45,68,0.08)', borderRadius: 4, padding: '1px 5px',
+                    }}>DNP</span>
+                  )}
+                </div>
+                {/* Actual score bar */}
+                <div style={{ height: 3, borderRadius: 2, background: 'rgba(60,45,68,0.08)', width: '80%' }}>
+                  <div style={{
+                    height: '100%', borderRadius: 2,
+                    width: `${barPct}%`,
+                    background: r.actual >= 10 ? '#4a7a4a' : r.actual >= 6 ? '#6b3553' : 'rgba(107,53,83,0.4)',
+                  }} />
+                </div>
+              </div>
+
+              {/* Fixtures count */}
+              <div style={{ textAlign: 'center', fontSize: 12, color: '#9b8aa1' }}>
+                {r.fixtures}
+              </div>
+
+              {/* Predicted */}
+              <div style={{ textAlign: 'right', fontFamily: "'Instrument Serif', serif", fontSize: 18, color: '#6b5a72' }}>
+                {r.pred.toFixed(1)}
+              </div>
+
+              {/* Actual */}
+              <div style={{ textAlign: 'right', fontFamily: "'Instrument Serif', serif", fontSize: 18, color: '#2a2230' }}>
+                {r.actual}
+              </div>
+
+              {/* Error */}
+              <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 600, color: errColor }}>
+                {r.error > 0 ? '+' : ''}{r.error.toFixed(1)}
+              </div>
+            </div>
+          );
+        })}
+
+        <div style={{ padding: '10px 16px', fontSize: 11, color: '#9b8aa1' }}>
+          Error = predicted − actual. Green = within 1 pt. Orange = under-predicted. Red = over-predicted.
+          Predictions use only data available before GW{gw} deadline — no hindsight.
+          DNP = did not play. DGW = double gameweek (2 fixtures).
+        </div>
+      </div>
+    </div>
+  );
 }
 
 Object.assign(window, { CompareView, calculateProjection, calculateWinProb });

@@ -35,6 +35,7 @@ DEFAULT_MANAGER_ID = 9364099
 DEFAULT_RIVAL_ID   = 646223
 DEFAULT_LEAGUE_ID  = 1141763   # Zweden PL
 DEFAULT_HORIZON    = 5
+BACKTEST_GW        = 31        # Use a completed regular GW for accuracy check
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +60,9 @@ class _State:
     hist_team_stats: dict  = {}   # {team_id: {home_scored_avg, ...}}
     optimal_by_gw: dict    = {}   # {gw: {xi_ids, captain_id, vice_id, total_xp}}
     calibration: list      = []   # [{name, our_xp, fpl_ep, pos}]
+    element_data: dict     = {}   # {player_id: ElementData} — kept for backtest
+    squad_pids: set        = set()
+    gw_accuracy: list      = []   # [{name, pred, actual, error, fixtures}]
 
 STATE = _State()
 
@@ -97,10 +101,12 @@ def _load() -> None:
     try:
         picks_raw = fpl_api.get_entry_picks(DEFAULT_MANAGER_ID, STATE.current_gw)
         squad_ids = [p["element"] for p in picks_raw.get("picks", [])]
+        STATE.squad_pids = set(squad_ids)
         raw_summaries = fpl_api.get_element_summaries_parallel(squad_ids)
         for pid, raw in raw_summaries.items():
             if raw:
                 element_data[pid] = xp_engine.parse_element_data(pid, raw)
+        STATE.element_data = element_data
     except Exception:
         pass
 
@@ -158,6 +164,12 @@ def _load() -> None:
                     STATE.deadline_label = ""
             break
 
+    # --- GW accuracy: backtest against completed GW ---
+    try:
+        STATE.gw_accuracy = _build_gw_accuracy(BACKTEST_GW)
+    except Exception:
+        STATE.gw_accuracy = []
+
     # --- Calibration: our xP vs FPL's ep_next (squad players only) ---
     try:
         picks_data = fpl_api.get_entry_picks(DEFAULT_MANAGER_ID, STATE.current_gw)
@@ -199,6 +211,86 @@ def _run_optimizer(my_squad_json: list[dict]) -> None:
             "viceName":    id_to_name.get(res["vice_id"], ""),
             "totalXp":     res["total_xp"],
         }
+
+
+def _build_gw_accuracy(target_gw: int = BACKTEST_GW) -> list[dict]:
+    """
+    Compare our model's predictions for a completed GW vs actual points scored.
+
+    Prediction uses element-summary history filtered to rounds BEFORE target_gw,
+    so there is zero look-ahead bias — this is exactly what the model would have
+    predicted had it run the evening before that GW's deadline.
+
+    Actual points come from the FPL live endpoint for that GW.
+    """
+    import fixture_engine
+
+    # --- Actual points from live GW data ---
+    try:
+        live = fpl_api.get_live_gw(target_gw)
+        # {player_id: {total_points, minutes, goals_scored, ...}}
+        live_map = {
+            el["id"]: el.get("stats", {})
+            for el in live.get("elements", [])
+        }
+    except Exception:
+        return []
+
+    # --- GW fixtures (handles DGW: multiple fixtures per team) ---
+    try:
+        schedule = fixture_engine.build_team_schedule(STATE.bootstrap, target_gw, 1)
+    except Exception:
+        return []
+
+    pos_names = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+    rows = []
+
+    for player in STATE.players:
+        if player.id not in STATE.squad_pids:
+            continue
+
+        # Build a truncated ElementData: only history from rounds BEFORE target_gw
+        el_full = STATE.element_data.get(player.id)
+        if el_full is not None:
+            pre_history = [h for h in el_full.history if h["round"] < target_gw]
+            truncated_el = xp_engine.ElementData(
+                player_id=player.id,
+                history=pre_history,
+                upcoming=el_full.upcoming,
+            )
+        else:
+            truncated_el = None
+
+        # GW fixtures for this player's team
+        gw_fixtures = [f for f in schedule.get(player.team_id, []) if f.gw == target_gw]
+
+        pred_xp = xp_engine._player_xp_for_gw(
+            player, gw_fixtures, truncated_el,
+            STATE.team_strength or None,
+            STATE.hist_team_stats or None,
+        )
+
+        stats   = live_map.get(player.id, {})
+        actual  = stats.get("total_points", 0)
+        minutes = stats.get("minutes", 0)
+        # Count unique fixtures player actually featured in (minutes > 0 across fixtures)
+        # For DGW tracking, use fixture count from schedule
+        num_fixtures = len(gw_fixtures)
+
+        rows.append({
+            "name":     player.web_name,
+            "pos":      pos_names.get(player.position, "?"),
+            "club":     STATE.team_short.get(player.team_id, ""),
+            "pred":     round(pred_xp, 2),
+            "actual":   actual,
+            "error":    round(pred_xp - actual, 2),
+            "minutes":  minutes,
+            "fixtures": num_fixtures,
+            "dgw":      num_fixtures >= 2,
+        })
+
+    rows.sort(key=lambda r: -r["actual"])
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +563,8 @@ window.FPL_STATE = {{
   deadline:     {json.dumps(STATE.deadline_label)},
   optimalByGw:  {optimal_by_gw_json},
   calibration:  {json.dumps(STATE.calibration)},
+  gwAccuracy:   {json.dumps(STATE.gw_accuracy)},
+  backtestGw:   {BACKTEST_GW},
 }};
 
 const MY_DIST    = {{ mean: {my_mean}, stddev: 15.2, p40: {my_mean + 4.5:.1f}, p60: {my_mean - 0.3:.1f}, p80: {my_mean - 15:.1f} }};
@@ -504,6 +598,9 @@ def refresh():
     STATE.hist_team_stats  = {}
     STATE.optimal_by_gw    = {}
     STATE.calibration      = []
+    STATE.gw_accuracy      = []
+    STATE.element_data     = {}
+    STATE.squad_pids       = set()
     return {"ok": True}
 
 
