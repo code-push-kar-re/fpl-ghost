@@ -642,6 +642,22 @@ def api_live(gw: int):
     return fpl_api.get_live_gw(gw)
 
 
+@app.get("/api/rival-squad/{entry_id}")
+def api_rival_squad(entry_id: int):
+    """
+    Return a rival's current GW picks in the same design-shape as RIVAL_SQUAD.
+    Called by the MVP onboarding when the user selects a rival before viewing Compare.
+    """
+    try:
+        _load()
+    except Exception as exc:
+        raise HTTPException(503, f"FPL data not available: {exc}")
+    try:
+        return _build_squad_json(entry_id)
+    except Exception as exc:
+        raise HTTPException(404, f"Couldn't load squad for entry {entry_id}: {exc}")
+
+
 @app.get("/api/onboard")
 def api_onboard(team_id: int):
     """

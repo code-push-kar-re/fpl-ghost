@@ -758,9 +758,17 @@ function MvpApp() {
 
   const handlePickLeague = (lg) => { setLeague(lg); setStep('rivals'); };
 
-  const handleGoCompare = (selectedRival) => {
+  const handleGoCompare = async (selectedRival) => {
     setRival(selectedRival);
     setTriesUsed(prev => prev + 1);
+    // Fetch this rival's actual squad before showing compare
+    try {
+      const res = await fetch(`/api/rival-squad/${selectedRival.id}`);
+      if (res.ok) {
+        const squad = await res.json();
+        if (Array.isArray(squad) && squad.length > 0) setRivalSquad(squad);
+      }
+    } catch (_) { /* fall back to default RIVAL_SQUAD */ }
     setStep('compare');
   };
 
