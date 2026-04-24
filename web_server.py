@@ -462,6 +462,14 @@ def _build_player_pool() -> list[dict]:
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.get("/mvp", response_class=HTMLResponse)
+def mvp_index():
+    html_path = DESIGN_DIR / "FPL Ghost MVP.html"
+    if not html_path.exists():
+        raise HTTPException(500, "MVP HTML not found")
+    return HTMLResponse(html_path.read_text())
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     html_path = DESIGN_DIR / "FPL Ghost.html"
@@ -632,6 +640,71 @@ def api_fixtures(event: Optional[int] = None):
 @app.get("/api/live/{gw}")
 def api_live(gw: int):
     return fpl_api.get_live_gw(gw)
+
+
+@app.get("/api/onboard")
+def api_onboard(team_id: int):
+    """
+    Fetch a manager's profile + leagues for the MVP onboarding flow.
+    Returns: id, name, team, overall_rank, total_points, gw_points, leagues[].
+    """
+    try:
+        entry = fpl_api.get_entry(team_id)
+    except Exception as exc:
+        raise HTTPException(404, f"Team {team_id} not found: {exc}")
+
+    leagues_raw = entry.get("leagues", {}).get("classic", [])
+    leagues = []
+    for lg in leagues_raw[:15]:
+        lg_type = "Global" if (lg.get("league_type") == "s" and lg["id"] in (314, 486)) else "Invitational"
+        leagues.append({
+            "id":        f"lg_{lg['id']}",
+            "fpl_id":    lg["id"],
+            "name":      lg["name"],
+            "size":      lg.get("rank_count", 0) or 0,
+            "my_rank":   lg.get("entry_rank", 0),
+            "prev_rank": lg.get("entry_last_rank", lg.get("entry_rank", 0)),
+            "type":      lg_type,
+        })
+
+    return {
+        "id":           team_id,
+        "name":         f"{entry.get('player_first_name', '')} {entry.get('player_last_name', '')}".strip(),
+        "team":         entry.get("name", "") or entry.get("entry_name", ""),
+        "overall_rank": entry.get("summary_overall_rank", 0) or 0,
+        "gw_points":    entry.get("summary_event_points", 0) or 0,
+        "total_points": entry.get("summary_overall_points", 0) or 0,
+        "leagues":      leagues,
+    }
+
+
+@app.get("/api/league/{fpl_league_id}/rivals")
+def api_league_rivals(fpl_league_id: int, me: int = DEFAULT_MANAGER_ID):
+    """
+    Return standings for a classic league — used by the Rivals step to show who to benchmark against.
+    """
+    try:
+        data = fpl_api.get_league_standings(fpl_league_id)
+    except Exception as exc:
+        raise HTTPException(404, str(exc))
+
+    rows = []
+    for entry in data.get("standings", {}).get("results", []):
+        eid   = entry["entry"]
+        prev  = entry.get("last_rank", entry["rank"])
+        delta = prev - entry["rank"]
+        rows.append({
+            "id":      eid,
+            "rank":    entry["rank"],
+            "prev":    prev,
+            "delta":   delta,
+            "manager": entry.get("player_name", ""),
+            "team":    entry.get("entry_name", ""),
+            "total":   entry.get("total", 0),
+            "gw":      entry.get("event_total", 0),
+            "isMe":    eid == me,
+        })
+    return rows
 
 
 @app.get("/api/regions")

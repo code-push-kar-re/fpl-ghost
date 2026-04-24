@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FPL Ghost · Onboarding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+
+<script>
+  window.__TWEAKS = { jerseyStyle: "textured", accentHue: "plum" };
+</script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #F2ECE3;
+    color: #2a2230;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+  button { font-family: inherit; }
+  input  { font-family: inherit; }
+  button:focus-visible, input:focus-visible, [role="button"]:focus-visible {
+    outline: 2px solid #6b3553;
+    outline-offset: 2px;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(1.3); }
+  }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .fade { animation: fadeInUp 0.35s ease both; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(60,45,68,0.15); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(60,45,68,0.3); }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- Real FPL data (MY_SQUAD, RIVAL_SQUAD, FPL_STATE, etc.) used by CompareView -->
+<script type="text/babel" src="data.jsx"></script>
+
+<!-- Jersey + status rendering (needed by CompareView) -->
+<script type="text/babel" src="jersey.jsx"></script>
+<script type="text/babel" src="status-flags.jsx"></script>
+
+<!-- Pitch + sim-leagues (needed by compare.jsx) -->
+<script type="text/babel" src="pitch.jsx"></script>
+<script type="text/babel" src="sim-leagues.jsx"></script>
+
+<!-- CompareView — exported as window.CompareView -->
+<script type="text/babel" src="compare.jsx"></script>
+
+<!-- MVP onboarding shell — mounts MvpApp to #root (not App!) -->
+<script type="text/babel" src="mvp-onboarding.jsx"></script>
+</body>
+</html>
