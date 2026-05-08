@@ -15,7 +15,10 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
   const [infoPlayer, setInfoPlayer] = React.useState(null);
 
   const starters = squad.slice(0, 11);
-  const bench = squad.slice(11, 15);
+  // Always render reserve GK (pos===1) first in bench row
+  const bench = [...squad.slice(11, 15)].sort((a, b) =>
+    a.pos === 1 ? -1 : b.pos === 1 ? 1 : 0
+  );
 
   // FPL formation validity (1 GK, 3-5 DEF, 2-5 MID, 1-3 FWD)
   const isValidFormation = (xi) => {
@@ -559,6 +562,13 @@ function MenuItem({ onClick, icon, label, hint, muted }) {
 function PlayerInfoDrawer({ player, onClose }) {
   if (!player) return null;
 
+  // Lock body scroll while open
+  React.useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const pos = player.pos === 1 ? 'GK' : player.pos === 2 ? 'DEF' : player.pos === 3 ? 'MID' : 'FWD';
   const yellows = player.yellowCards ?? player.yellow_cards ?? 0;
   // FPL: 5 yellows in first 19 GWs OR 10 yellows total = 1-match ban
@@ -567,11 +577,13 @@ function PlayerInfoDrawer({ player, onClose }) {
   const xpArr = player.xpByGw || [];
   const maxXp = Math.max(...xpArr.map(g => g.xp), 1);
 
-  return (
+  // Portal to document.body ensures position:fixed is always relative to
+  // the actual viewport, not a transformed/filtered ancestor container.
+  return ReactDOM.createPortal(
     <div
       onClick={onClose}
       style={{
-        position: 'fixed', inset: 0, zIndex: 200,
+        position: 'fixed', inset: 0, zIndex: 9999,
         background: 'rgba(42, 26, 48, 0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         backdropFilter: 'blur(4px)',
@@ -585,7 +597,8 @@ function PlayerInfoDrawer({ player, onClose }) {
           boxShadow: '0 24px 60px rgba(60,30,50,0.25)',
           width: 340,
           maxWidth: '92vw',
-          overflow: 'hidden',
+          maxHeight: '90vh',
+          overflowY: 'auto',
           fontFamily: 'Inter, sans-serif',
         }}
       >
@@ -683,7 +696,8 @@ function PlayerInfoDrawer({ player, onClose }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
