@@ -60,17 +60,29 @@ function MvpApp() {
     setTriesUsed(t => t + 1);
     // Expose rival info globally so CompareSimulator descriptions use the real name
     window.RIVAL_INFO = { id: r.id, manager: r.manager, team: r.team };
-    // Reset squads to defaults before fetching
+    // Reset squads to mock while fetching
     setMySquad(window.MY_SQUAD || []);
     setRivalSquad(window.RIVAL_SQUAD || []);
-    // Fetch this rival's real squad
+    // Fetch both squads in parallel
     try {
-      const res = await fetch(`/api/rival-squad/${r.id}`);
-      if (res.ok) {
-        const squad = await res.json();
-        if (Array.isArray(squad) && squad.length > 0) setRivalSquad(squad);
+      const [myRes, rivalRes] = await Promise.all([
+        fetch(`/api/rival-squad/${manager.id}`),
+        fetch(`/api/rival-squad/${r.id}`),
+      ]);
+      if (myRes.ok) {
+        const myData = await myRes.json();
+        if (Array.isArray(myData) && myData.length > 0) {
+          setMySquad(myData);
+          // Set the real next GW so the GW tabs show correct numbers
+          const nextGw = myData[0]?.xpByGw?.[0]?.gw;
+          if (nextGw) window.FPL_STATE = { ...(window.FPL_STATE || {}), nextGw };
+        }
       }
-    } catch (_) { /* fall back to default RIVAL_SQUAD */ }
+      if (rivalRes.ok) {
+        const rivalData = await rivalRes.json();
+        if (Array.isArray(rivalData) && rivalData.length > 0) setRivalSquad(rivalData);
+      }
+    } catch (_) { /* fall back to mock squads */ }
     setStep('compare');
   };
 
