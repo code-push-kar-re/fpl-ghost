@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
+from collections import defaultdict
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from _fpl import (
@@ -12,11 +13,71 @@ from _fpl import (
 app = FastAPI()
 
 DEFAULT_ME = 9364099
+FPL_LAST_GW = 38   # PL season always ends at GW38
 
 _KNOWN_CLUBS = {
     "ARS","AVL","BOU","BRE","BHA","CHE","CRY","EVE","FUL",
     "IPS","LEI","LIV","MCI","MUN","NEW","NFO","SOU","TOT","WHU","WOL",
 }
+
+# FDR → projection multiplier for GWs beyond the immediate next one
+_FDR_MULT = {1: 1.25, 2: 1.10, 3: 1.00, 4: 0.82, 5: 0.62}
+
+
+def _build_fixtures_map():
+    """Fetch all remaining fixtures and return team_id -> {gw: [fdr, ...]}."""
+    try:
+        fixtures = fpl_get("fixtures/", timeout=8)
+    except Exception:
+        return {}
+    fx = defaultdict(lambda: defaultdict(list))
+    for f in fixtures:
+        ev = f.get("event")
+        if not ev:
+            continue
+        fx[f["team_h"]][ev].append(f.get("team_h_difficulty", 3))
+        fx[f["team_a"]][ev].append(f.get("team_a_difficulty", 3))
+    return fx
+
+
+def _xp_by_gw(ep_next: float, team_id: int, next_gw: int, fx_map: dict) -> list:
+    """
+    Build a 5-GW (or fewer if season ends) projection list.
+    - GW next_gw   : use ep_next directly (FPL's own estimate)
+    - Later GWs    : FDR-adjusted decay, DGW doubles, BGW zeros
+    - Capped at GW38
+    """
+    result = []
+    for i in range(5):
+        gw = next_gw + i
+        if gw > FPL_LAST_GW:
+            break
+        team_gw = fx_map.get(team_id, {}).get(gw, [])
+        if i == 0:
+            # Trust FPL's ep_next for the immediate next GW
+            if not team_gw:
+                xp = 0.0          # BGW confirmed
+            elif len(team_gw) >= 2:
+                xp = round(ep_next * 1.65, 2)  # DGW boost
+            else:
+                xp = round(ep_next, 2)
+        else:
+            # Decay base from ep_next, then adjust for fixture context
+            base = ep_next * max(0.50, 1.0 - i * 0.07)
+            if not team_gw:
+                xp = 0.0          # BGW
+            elif len(team_gw) >= 2:
+                # DGW: both fixtures, second is ~60% of first
+                fdr1, fdr2 = team_gw[0], team_gw[1]
+                xp = round(
+                    base * _FDR_MULT.get(fdr1, 1.0) +
+                    base * 0.60 * _FDR_MULT.get(fdr2, 1.0),
+                    2,
+                )
+            else:
+                xp = round(base * _FDR_MULT.get(team_gw[0], 1.0), 2)
+        result.append({"gw": gw, "xp": xp})
+    return result
 
 
 # ── /api/onboard ────────────────────────────────────────────────────────────
@@ -109,7 +170,7 @@ def rivals(fpl_id: int, me: int = DEFAULT_ME):
 
 # ── /api/rival-squad/{entry_id} ─────────────────────────────────────────────
 
-def _build_squad(picks, bootstrap, next_gw):
+def _build_squad(picks, bootstrap, next_gw, fx_map=None):
     player_map = {e["id"]: e for e in bootstrap.get("elements", [])}
     team_map   = {t["id"]: t["short_name"] for t in bootstrap.get("teams", [])}
     squad = []
@@ -124,11 +185,13 @@ def _build_squad(picks, bootstrap, next_gw):
         if club not in _KNOWN_CLUBS:
             club = "ARS"
 
-        ep_next = float(p.get("ep_next") or p.get("ep_this") or 0)
-        xp_by_gw = [
-            {"gw": next_gw + i, "xp": round(ep_next * max(0.5, 1.0 - i * 0.08), 2)}
-            for i in range(5)
-        ]
+        ep_next  = float(p.get("ep_next") or p.get("ep_this") or 0)
+        team_id  = p.get("team", 0)
+        xp_by_gw = (
+            _xp_by_gw(ep_next, team_id, next_gw, fx_map)
+            if fx_map is not None
+            else [{"gw": next_gw + i, "xp": round(ep_next * max(0.5, 1.0 - i * 0.08), 2)} for i in range(5)]
+        )
 
         status = p.get("status", "a")
         if status not in ("a", "i", "d", "s", "u"):
@@ -175,6 +238,7 @@ def rival_squad(entry_id: int):
 
     current_gw = get_current_gw(bootstrap)
     next_gw    = get_next_gw(bootstrap)
+    fx_map     = _build_fixtures_map()   # fetch fixture data for accurate xpByGw
 
     try:
         picks_data = fpl_get(f"entry/{entry_id}/event/{current_gw}/picks/")
@@ -190,7 +254,7 @@ def rival_squad(entry_id: int):
     if not picks:
         return JSONResponse({"error": "No picks found"}, status_code=404)
 
-    return _build_squad(picks, bootstrap, next_gw)
+    return _build_squad(picks, bootstrap, next_gw, fx_map)
 
 
 # ── /api/player-pool ─────────────────────────────────────────────────────────
@@ -203,9 +267,10 @@ def player_pool():
     except Exception:
         return JSONResponse({"error": "FPL API temporarily unreachable"}, status_code=503)
 
-    next_gw   = get_next_gw(bootstrap)
-    team_map  = {t["id"]: t["short_name"] for t in bootstrap.get("teams", [])}
-    players   = []
+    next_gw  = get_next_gw(bootstrap)
+    team_map = {t["id"]: t["short_name"] for t in bootstrap.get("teams", [])}
+    fx_map   = _build_fixtures_map()   # DGW/BGW-aware projections
+    players  = []
 
     for p in bootstrap.get("elements", []):
         status = p.get("status", "a")
@@ -216,11 +281,9 @@ def player_pool():
         if club not in _KNOWN_CLUBS:
             club = "ARS"
 
-        ep_next = float(p.get("ep_next") or p.get("ep_this") or 0)
-        xp_by_gw = [
-            {"gw": next_gw + i, "xp": round(ep_next * max(0.5, 1.0 - i * 0.08), 2)}
-            for i in range(5)
-        ]
+        ep_next  = float(p.get("ep_next") or p.get("ep_this") or 0)
+        team_id  = p.get("team", 0)
+        xp_by_gw = _xp_by_gw(ep_next, team_id, next_gw, fx_map)
 
         players.append({
             "id":       f"p{p['id']}",
@@ -236,6 +299,6 @@ def player_pool():
             "xpByGw":  xp_by_gw,
         })
 
-    # Sort by projected points descending so the best candidates come first
+    # Sort by projected points descending
     players.sort(key=lambda x: x["proj"], reverse=True)
     return players

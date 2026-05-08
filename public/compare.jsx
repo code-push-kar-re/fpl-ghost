@@ -26,8 +26,10 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
   const nextGw     = window.FPL_STATE?.nextGw || 1;
   const optimalMap = window.FPL_STATE?.optimalByGw || {};
   const gws        = Object.keys(optimalMap).map(Number).sort((a,b)=>a-b);
-  // Fall back to next 5 GWs if optimizer didn't run
-  const gwList     = gws.length ? gws : Array.from({length:5}, (_,i) => nextGw + i);
+  // Fall back to next 5 GWs, capped at GW38 (last GW of the PL season)
+  const gwList     = gws.length
+    ? gws.filter(g => g <= 38)
+    : Array.from({length:5}, (_,i) => nextGw + i).filter(g => g <= 38);
 
   const [selectedGw, setSelectedGw] = React.useState(gwList[0] || nextGw);
 

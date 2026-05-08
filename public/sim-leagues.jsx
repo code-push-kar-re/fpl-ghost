@@ -1,7 +1,7 @@
 // Suggested transfers — always-visible pre-computed cards with hover-to-preview stats bar.
 
 function CompareSimulator({ mySquad, setMySquad, rivalSquad, jerseyStyle }) {
-  const [horizonMode, setHorizonMode] = React.useState('next'); // 'next' | 'five'
+  const [horizonMode, setHorizonMode] = React.useState('five'); // 'next' | 'five' — default to 5-GW view
   const [hoveredIdx, setHoveredIdx]   = React.useState(null);
 
   const POOL      = window.PLAYER_POOL || [];
