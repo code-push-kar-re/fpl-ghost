@@ -105,7 +105,7 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
         gw={selectedGw}
       />
 
-      {/* Live transfer simulator */}
+      {/* Suggested transfers + hover-preview stats */}
       <window.CompareSimulator
         mySquad={mySquadGw}
         setMySquad={setMySquad}
@@ -113,8 +113,8 @@ function CompareView({ mySquad, rivalSquad, setMySquad, setRivalSquad, jerseySty
         jerseyStyle={jerseyStyle}
       />
 
-      {/* Status alert if flags present */}
-      <div style={{ marginTop: 16 }}>
+      {/* Status flags banner */}
+      <div style={{ marginTop: 14 }}>
         <window.StatusAlertBanner squad={mySquadGw} />
       </div>
 

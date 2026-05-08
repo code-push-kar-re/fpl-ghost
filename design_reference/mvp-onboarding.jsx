@@ -58,6 +58,8 @@ function MvpApp() {
     setPendingRival(null);
     setRival(r);
     setTriesUsed(t => t + 1);
+    // Expose rival info globally so CompareSimulator descriptions use the real name
+    window.RIVAL_INFO = { id: r.id, manager: r.manager, team: r.team };
     // Reset squads to defaults before fetching
     setMySquad(window.MY_SQUAD || []);
     setRivalSquad(window.RIVAL_SQUAD || []);
