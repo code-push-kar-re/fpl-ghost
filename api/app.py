@@ -1,17 +1,17 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from _fpl import (
     fpl_get, is_network_error,
     get_current_gw, get_next_gw,
     DEMO_MANAGER, DEMO_RIVALS,
 )
 
-app = Flask(__name__)
+app = FastAPI()
 
 DEFAULT_ME = 9364099
-DEFAULT_ID = 9364099
 
 _KNOWN_CLUBS = {
     "ARS","AVL","BOU","BRE","BHA","CHE","CRY","EVE","FUL",
@@ -21,22 +21,27 @@ _KNOWN_CLUBS = {
 
 # ── /api/onboard ────────────────────────────────────────────────────────────
 
-@app.route("/api/onboard")
-def onboard():
-    raw_id = request.args.get("team_id", "")
+@app.get("/api/onboard")
+def onboard(team_id: str = ""):
     try:
-        team_id = int(raw_id)
-    except ValueError:
-        return jsonify({"error": "team_id must be a number"}), 400
+        team_id_int = int(team_id)
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "team_id must be a number"}, status_code=400)
 
     try:
-        entry = fpl_get(f"entry/{team_id}/")
+        entry = fpl_get(f"entry/{team_id_int}/")
     except Exception as exc:
-        if is_network_error(exc) and team_id == DEFAULT_ID:
-            return jsonify({**DEMO_MANAGER, "_offline": True})
+        if is_network_error(exc) and team_id_int == DEFAULT_ME:
+            return {**DEMO_MANAGER, "_offline": True}
         if is_network_error(exc):
-            return jsonify({"error": "FPL API is temporarily unreachable. Please try again in a moment."}), 503
-        return jsonify({"error": f"Team {team_id} not found. Double-check your ID and try again."}), 404
+            return JSONResponse(
+                {"error": "FPL API is temporarily unreachable. Please try again in a moment."},
+                status_code=503,
+            )
+        return JSONResponse(
+            {"error": f"Team {team_id_int} not found. Double-check your ID and try again."},
+            status_code=404,
+        )
 
     leagues_raw = entry.get("leagues", {}).get("classic", [])
     leagues = []
@@ -56,31 +61,32 @@ def onboard():
             "type":      lg_type,
         })
 
-    return jsonify({
-        "id":           team_id,
+    return {
+        "id":           team_id_int,
         "name":         f"{entry.get('player_first_name', '')} {entry.get('player_last_name', '')}".strip(),
         "team":         entry.get("name", "") or entry.get("entry_name", ""),
         "overall_rank": entry.get("summary_overall_rank", 0) or 0,
         "gw_points":    entry.get("summary_event_points", 0) or 0,
         "total_points": entry.get("summary_overall_points", 0) or 0,
         "leagues":      leagues,
-    })
+    }
 
 
-# ── /api/league/<fpl_id>/rivals ─────────────────────────────────────────────
+# ── /api/league/{fpl_id}/rivals ─────────────────────────────────────────────
 
-@app.route("/api/league/<int:fpl_id>/rivals")
-def rivals(fpl_id):
-    me_id = request.args.get("me", DEFAULT_ME, type=int)
-
+@app.get("/api/league/{fpl_id}/rivals")
+def rivals(fpl_id: int, me: int = DEFAULT_ME):
     try:
         data = fpl_get(f"leagues-classic/{fpl_id}/standings/")
     except Exception as exc:
         if is_network_error(exc):
             if fpl_id in DEMO_RIVALS:
-                return jsonify(DEMO_RIVALS[fpl_id])
-            return jsonify({"error": "FPL API is temporarily unreachable. Please try again in a moment."}), 503
-        return jsonify({"error": f"League {fpl_id} not found."}), 404
+                return DEMO_RIVALS[fpl_id]
+            return JSONResponse(
+                {"error": "FPL API is temporarily unreachable. Please try again in a moment."},
+                status_code=503,
+            )
+        return JSONResponse({"error": f"League {fpl_id} not found."}, status_code=404)
 
     rows = []
     for entry in data.get("standings", {}).get("results", []):
@@ -95,13 +101,13 @@ def rivals(fpl_id):
             "team":    entry.get("entry_name", ""),
             "total":   entry.get("total", 0),
             "gw":      entry.get("event_total", 0),
-            "isMe":    eid == me_id,
+            "isMe":    eid == me,
         })
 
-    return jsonify(rows)
+    return rows
 
 
-# ── /api/rival-squad/<entry_id> ─────────────────────────────────────────────
+# ── /api/rival-squad/{entry_id} ─────────────────────────────────────────────
 
 def _build_squad(picks, bootstrap, next_gw):
     player_map = {e["id"]: e for e in bootstrap.get("elements", [])}
@@ -160,12 +166,12 @@ def _build_squad(picks, bootstrap, next_gw):
     return squad
 
 
-@app.route("/api/rival-squad/<int:entry_id>")
-def rival_squad(entry_id):
+@app.get("/api/rival-squad/{entry_id}")
+def rival_squad(entry_id: int):
     try:
         bootstrap = fpl_get("bootstrap-static/", timeout=10)
     except Exception:
-        return jsonify({"error": "FPL API temporarily unreachable"}), 503
+        return JSONResponse({"error": "FPL API temporarily unreachable"}, status_code=503)
 
     current_gw = get_current_gw(bootstrap)
     next_gw    = get_next_gw(bootstrap)
@@ -174,11 +180,14 @@ def rival_squad(entry_id):
         picks_data = fpl_get(f"entry/{entry_id}/event/{current_gw}/picks/")
     except Exception as exc:
         if is_network_error(exc):
-            return jsonify({"error": "FPL API temporarily unreachable"}), 503
-        return jsonify({"error": f"Could not load squad for entry {entry_id}"}), 404
+            return JSONResponse({"error": "FPL API temporarily unreachable"}, status_code=503)
+        return JSONResponse(
+            {"error": f"Could not load squad for entry {entry_id}"},
+            status_code=404,
+        )
 
     picks = picks_data.get("picks", [])
     if not picks:
-        return jsonify({"error": "No picks found"}), 404
+        return JSONResponse({"error": "No picks found"}, status_code=404)
 
-    return jsonify(_build_squad(picks, bootstrap, next_gw))
+    return _build_squad(picks, bootstrap, next_gw)
