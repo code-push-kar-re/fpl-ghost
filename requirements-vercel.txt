@@ -1,3 +1,1 @@
-# Vercel deployment — API functions use Python stdlib only (urllib, json, http.server).
-# No external packages required for the serverless functions.
-# This file is intentionally empty so Vercel installs nothing and cold-starts are fast.
+flask>=3.0.0
