@@ -1,20 +1,10 @@
 {
   "version": 2,
-  "installCommand": "pip install -r requirements-vercel.txt",
-  "buildCommand": "echo 'no build step'",
   "outputDirectory": "public",
   "routes": [
     {
-      "src": "/api/rival-squad/([^/]+)",
-      "dest": "/api/rival-squad/[id].py?id=$1"
-    },
-    {
-      "src": "/api/league/([^/]+)/rivals",
-      "dest": "/api/league/[fpl_id]/rivals.py?fpl_id=$1"
-    },
-    {
-      "src": "/api/onboard",
-      "dest": "/api/onboard.py"
+      "src": "/api/(.*)",
+      "dest": "/api/app.py"
     },
     {
       "src": "/mvp",
