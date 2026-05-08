@@ -36,8 +36,8 @@ function CompareSimulator({ mySquad, setMySquad, rivalSquad, jerseyStyle }) {
   const applyTransfer = (rec) => {
     setMySquad(prev => prev.map(p => p.id === rec.out.id ? {
       ...rec.in,
-      id: `p_${rec.in.id}_${Date.now()}`,
-      last: rec.in.name.toUpperCase(),
+      // Keep the pool player's real id so duplicate-detection still works
+      last: (rec.in.name || rec.in.last || 'PLAYER').toUpperCase().slice(0, 10),
       captain: p.captain, vice: p.vice, startIdx: p.startIdx,
       status: rec.in.status || 'a',
     } : p));
@@ -292,21 +292,38 @@ function _gwSum(player) {
 }
 
 function computeTopTransfers(mySquad, rivalSquad, pool, rivalFirstName, useMultiGw = false) {
-  const myIds    = new Set(mySquad.map(p => p.id));
-  const rivalIds = new Set(rivalSquad.slice(0, 11).map(p => p.id));
+  // ── FPL rule helpers ──────────────────────────────────────────────────────
+  // Normalise IDs: strip any "p_" prefix mangling so pool IDs always match
+  const normalId = id => (id || '').replace(/^p_/, 'p');
+  const myIds = new Set(mySquad.map(p => normalId(p.id)));
+
+  // Club counts across full 15-man squad
+  const clubCount = {};
+  mySquad.forEach(p => { clubCount[p.club] = (clubCount[p.club] || 0) + 1; });
+
+  const rivalIds = new Set(rivalSquad.slice(0, 11).map(p => normalId(p.id)));
   const starters = mySquad.filter(p => p.startIdx < 11);
   const recs     = [];
-  const itb      = 1.5; // £1.5m budget wiggle — relaxed so more candidates surface
+  const itb      = 1.5; // £1.5m budget wiggle
   const rName    = rivalFirstName || 'Your rival';
 
   const score = p => useMultiGw ? _gwSum(p) : p.proj;
 
   for (const out of starters) {
-    const candidates = pool.filter(p =>
-      p.pos === out.pos &&
-      !myIds.has(p.id) &&
-      p.price - out.price <= itb
-    );
+    const candidates = pool.filter(p => {
+      const pid = normalId(p.id);
+      // 1. Must be same position
+      if (p.pos !== out.pos) return false;
+      // 2. Can't bring in a player already in the squad
+      if (myIds.has(pid)) return false;
+      // 3. Budget: incoming price ≤ outgoing price + ITB
+      if (p.price - out.price > itb) return false;
+      // 4. Max 3 players from same club (net change: -1 out.club, +1 inP.club)
+      //    If same club as out player, club count stays the same — always fine
+      //    If different club, new count = current count + 1, must be ≤ 3
+      if (p.club !== out.club && (clubCount[p.club] || 0) >= 3) return false;
+      return true;
+    });
     for (const inP of candidates) {
       const delta    = score(inP) - score(out);
       if (delta <= 0.1) continue;
