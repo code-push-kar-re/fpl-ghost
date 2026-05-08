@@ -119,7 +119,7 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
     setActionMenu(null);
   };
 
-  const handleCardClick = (player, e) => {
+  const handleCardClick = (player) => {
     if (!interactive) return;
     // In swap mode: a click on an eligible target performs the swap; anything else cancels
     if (swapMode) {
@@ -132,7 +132,7 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
       return;
     }
     setSelected(player);
-    setActionMenu({ playerId: player.id, x: e.clientX, y: e.clientY });
+    setActionMenu({ playerId: player.id });
   };
 
   const Row = ({ players, yPct }) => (
@@ -155,9 +155,15 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
           highlight={swapMode?.eligibleIds.has(p.id)}
           dimmed={swapMode && !swapMode.eligibleIds.has(p.id) && swapMode.sourceId !== p.id}
           source={swapMode?.sourceId === p.id}
-          onClick={(e) => handleCardClick(p, e)}
+          onClick={() => handleCardClick(p)}
           onInfo={() => setInfoPlayer(p)}
           size={compact ? 44 : 56}
+          menuOpen={interactive && actionMenu?.playerId === p.id}
+          onCaptain={() => setCaptain(p.id)}
+          onVice={() => setVice(p.id)}
+          onPromote={() => startSwapMode(p.id)}
+          onCloseMenu={() => { setActionMenu(null); setSelected(null); }}
+          rowPosition={yPct < 20 ? 'top' : 'bottom'}
         />
       ))}
     </div>
@@ -291,10 +297,16 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
               highlight={swapMode?.eligibleIds.has(p.id)}
               dimmed={swapMode && !swapMode.eligibleIds.has(p.id) && swapMode.sourceId !== p.id}
               source={swapMode?.sourceId === p.id}
-              onClick={(e) => handleCardClick(p, e)}
+              onClick={() => handleCardClick(p)}
               onInfo={() => setInfoPlayer(p)}
               size={compact ? 40 : 48}
               dim
+              menuOpen={interactive && actionMenu?.playerId === p.id}
+              onCaptain={() => setCaptain(p.id)}
+              onVice={() => setVice(p.id)}
+              onPromote={() => startSwapMode(p.id)}
+              onCloseMenu={() => { setActionMenu(null); setSelected(null); }}
+              rowPosition="bottom"
             />
           ))}
         </div>
@@ -328,25 +340,11 @@ function PitchView({ squad, setSquad, jerseyStyle, compact = false, interactive 
         <window.PlayerInfoDrawer player={infoPlayer} onClose={() => setInfoPlayer(null)} />
       )}
 
-      {/* Action menu */}
-      {actionMenu && interactive && (
-        <ActionMenu
-          playerId={actionMenu.playerId}
-          x={actionMenu.x}
-          y={actionMenu.y}
-          squad={squad}
-          onCaptain={() => setCaptain(actionMenu.playerId)}
-          onVice={() => setVice(actionMenu.playerId)}
-          onPromote={() => startSwapMode(actionMenu.playerId)}
-          onClose={() => { setActionMenu(null); setSelected(null); }}
-        />
-      )}
     </div>
   );
 }
 
-function PlayerCard({ player, jerseyStyle, selected, onClick, onInfo, size = 56, dim = false, highlight = false, dimmed = false, source = false }) {
-  const priceLabel = `${player.price.toFixed(1)}M`;
+function PlayerCard({ player, jerseyStyle, selected, onClick, onInfo, size = 56, dim = false, highlight = false, dimmed = false, source = false, menuOpen = false, onCaptain, onVice, onPromote, onCloseMenu, rowPosition = 'bottom' }) {
   const opacity = dimmed ? 0.35 : (dim ? 0.92 : 1);
   const transform = source
     ? 'translateY(-4px) scale(1.06)'
@@ -369,8 +367,19 @@ function PlayerCard({ player, jerseyStyle, selected, onClick, onInfo, size = 56,
         transform,
         opacity,
         filter,
+        zIndex: menuOpen ? 50 : 1,
       }}
     >
+      {menuOpen && (
+        <ActionMenu
+          player={player}
+          rowPosition={rowPosition}
+          onCaptain={onCaptain}
+          onVice={onVice}
+          onPromote={onPromote}
+          onClose={onCloseMenu}
+        />
+      )}
       {highlight && (
         <div style={{
           position: 'absolute',
@@ -471,38 +480,41 @@ function PlayerCard({ player, jerseyStyle, selected, onClick, onInfo, size = 56,
   );
 }
 
-function ActionMenu({ playerId, x, y, squad, onCaptain, onVice, onPromote, onClose }) {
+function ActionMenu({ player, rowPosition, onCaptain, onVice, onPromote, onClose }) {
   const ref = React.useRef();
   React.useEffect(() => {
     const handler = (e) => {
       if (ref.current && !ref.current.contains(e.target)) onClose();
     };
+    // Delay so the click that opened the menu doesn't immediately close it
     setTimeout(() => document.addEventListener('mousedown', handler), 0);
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  const player = squad.find(p => p.id === playerId);
-  if (!player) return null;
-
-  // Position menu sensibly
-  const menuX = Math.min(x, window.innerWidth - 200);
-  const menuY = Math.min(y, window.innerHeight - 240);
+  // Place below the player for the GK row (top of pitch), above for everyone else
+  const placeBelow = rowPosition === 'top';
+  const verticalStyle = placeBelow
+    ? { top: 'calc(100% + 8px)' }
+    : { bottom: 'calc(100% + 8px)' };
 
   return (
     <div
       ref={ref}
+      onClick={e => e.stopPropagation()}
       style={{
-        position: 'fixed',
-        top: menuY,
-        left: menuX,
+        position: 'absolute',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        ...verticalStyle,
         background: '#FDFAF4',
         border: '1px solid rgba(60, 45, 68, 0.15)',
         borderRadius: 10,
         boxShadow: '0 12px 32px rgba(60, 30, 50, 0.18), 0 2px 8px rgba(60, 30, 50, 0.08)',
         padding: 8,
-        minWidth: 200,
+        minWidth: 220,
         zIndex: 100,
         fontFamily: 'Inter, sans-serif',
+        cursor: 'default',
       }}
     >
       <div style={{ padding: '8px 10px 10px', borderBottom: '1px solid rgba(60, 45, 68, 0.08)' }}>
@@ -511,18 +523,30 @@ function ActionMenu({ playerId, x, y, squad, onCaptain, onVice, onPromote, onClo
         </div>
         <div style={{ fontSize: 15, fontWeight: 600, color: '#2a2230' }}>{player.name}</div>
         <div style={{ fontSize: 12, color: '#6b5a72', marginTop: 2 }}>
-          {window.TEAMS[player.club]?.name} · £{player.price.toFixed(1)}m · {player.proj.toFixed(1)} pts proj
+          {window.TEAMS?.[player.club]?.name || player.club} · £{player.price.toFixed(1)}m · {player.proj.toFixed(1)} pts proj
         </div>
       </div>
       <MenuItem onClick={onCaptain} icon="C" label={player.captain ? 'Remove captaincy' : 'Make captain'} />
       <MenuItem onClick={onVice} icon="V" label={player.vice ? 'Remove vice' : 'Make vice-captain'} />
       <MenuItem onClick={onPromote} icon="↕" label={player.startIdx < 11 ? 'Swap with bench…' : 'Promote to starting XI…'} hint="Tap another player" />
+      <div style={{ height: 1, background: 'rgba(60,45,68,0.08)', margin: '4px 0' }} />
+      <MenuItem
+        onClick={() => {
+          window.dispatchEvent(new CustomEvent('fpl-transfer-out', { detail: { playerId: player.id } }));
+          onClose();
+        }}
+        icon="↗"
+        iconColor="#b85a4e"
+        label="Transfer out…"
+        hint={`£${player.price.toFixed(1)}m · ${player.proj.toFixed(1)} pts proj`}
+      />
     </div>
   );
 }
 
-function MenuItem({ onClick, icon, label, hint, muted }) {
+function MenuItem({ onClick, icon, iconColor, label, hint, muted }) {
   const [hover, setHover] = React.useState(false);
+  const baseColor = iconColor || '#6b3553';
   return (
     <div
       onClick={onClick}
@@ -535,20 +559,20 @@ function MenuItem({ onClick, icon, label, hint, muted }) {
         padding: '9px 10px',
         borderRadius: 6,
         cursor: onClick ? 'pointer' : 'default',
-        background: hover && onClick ? 'rgba(123, 60, 96, 0.08)' : 'transparent',
+        background: hover && onClick ? `${baseColor}14` : 'transparent',
         opacity: muted ? 0.7 : 1,
       }}
     >
       <div style={{
         width: 22, height: 22,
         borderRadius: '50%',
-        background: 'rgba(123, 60, 96, 0.1)',
+        background: `${baseColor}1A`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: 11,
         fontWeight: 700,
-        color: '#6b3553',
+        color: baseColor,
       }}>{icon}</div>
       <div style={{ flex: 1 }}>
         <div style={{ fontSize: 13, color: '#2a2230', fontWeight: 500 }}>{label}</div>
