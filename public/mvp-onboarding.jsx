@@ -63,11 +63,12 @@ function MvpApp() {
     // Reset squads to mock while fetching
     setMySquad(window.MY_SQUAD || []);
     setRivalSquad(window.RIVAL_SQUAD || []);
-    // Fetch both squads in parallel
+    // Fetch both squads + full player pool in parallel
     try {
-      const [myRes, rivalRes] = await Promise.all([
+      const [myRes, rivalRes, poolRes] = await Promise.all([
         fetch(`/api/rival-squad/${manager.id}`),
         fetch(`/api/rival-squad/${r.id}`),
+        fetch('/api/player-pool'),
       ]);
       if (myRes.ok) {
         const myData = await myRes.json();
@@ -81,6 +82,10 @@ function MvpApp() {
       if (rivalRes.ok) {
         const rivalData = await rivalRes.json();
         if (Array.isArray(rivalData) && rivalData.length > 0) setRivalSquad(rivalData);
+      }
+      if (poolRes.ok) {
+        const poolData = await poolRes.json();
+        if (Array.isArray(poolData)) window.PLAYER_POOL = poolData;
       }
     } catch (_) { /* fall back to mock squads */ }
     setStep('compare');

@@ -13,8 +13,8 @@ function CompareSimulator({ mySquad, setMySquad, rivalSquad, jerseyStyle }) {
   const baseWinProb = window.calculateWinProb(baseProj, rivalProj, 15.2, 16.8);
 
   const recs = React.useMemo(
-    () => computeTopTransfers(mySquad, rivalSquad, POOL, rivalName),
-    [mySquad, rivalSquad]
+    () => computeTopTransfers(mySquad, rivalSquad, POOL, rivalName, horizonMode === 'five'),
+    [mySquad, rivalSquad, horizonMode]
   );
 
   // Preview squad when a card is hovered
@@ -285,13 +285,21 @@ function TransferCard({ rec, rank, jerseyStyle, hovered, onMouseEnter, onMouseLe
 // ── Transfer scoring algorithm ─────────────────────────────────────────────
 // Scores every valid (out, in) pair and returns top results ranked by:
 //   1. Blank-gameweek dodges  2. Catch-rival differentials  3. Pure xP upgrade
-function computeTopTransfers(mySquad, rivalSquad, pool, rivalFirstName) {
+function _gwSum(player) {
+  const gws = player.xpByGw;
+  if (!gws || !gws.length) return player.proj * 5;
+  return gws.reduce((s, g) => s + g.xp, 0);
+}
+
+function computeTopTransfers(mySquad, rivalSquad, pool, rivalFirstName, useMultiGw = false) {
   const myIds    = new Set(mySquad.map(p => p.id));
   const rivalIds = new Set(rivalSquad.slice(0, 11).map(p => p.id));
-  const starters = mySquad.slice(0, 11);
+  const starters = mySquad.filter(p => p.startIdx < 11);
   const recs     = [];
-  const itb      = 0.5;
+  const itb      = 1.5; // £1.5m budget wiggle — relaxed so more candidates surface
   const rName    = rivalFirstName || 'Your rival';
+
+  const score = p => useMultiGw ? _gwSum(p) : p.proj;
 
   for (const out of starters) {
     const candidates = pool.filter(p =>
@@ -300,7 +308,7 @@ function computeTopTransfers(mySquad, rivalSquad, pool, rivalFirstName) {
       p.price - out.price <= itb
     );
     for (const inP of candidates) {
-      const delta    = inP.proj - out.proj;
+      const delta    = score(inP) - score(out);
       if (delta <= 0.1) continue;
 
       const rivalHas = rivalIds.has(inP.id);
@@ -311,6 +319,8 @@ function computeTopTransfers(mySquad, rivalSquad, pool, rivalFirstName) {
         description = `${out.name} has a blank gameweek. ${inP.name} plays and scores.`;
       } else if (rivalHas) {
         description = `${rName} owns ${inP.name}. Bringing them in removes a key differential against you.`;
+      } else if (useMultiGw) {
+        description = `${inP.name} projects ${_gwSum(inP).toFixed(1)} pts over 5 GWs vs ${_gwSum(out).toFixed(1)} for ${out.name} — a +${delta.toFixed(1)} pt cumulative gain.`;
       } else {
         description = `${inP.name} (${inP.proj.toFixed(1)} xP) outprojects ${out.name} (${out.proj.toFixed(1)} xP) — a +${delta.toFixed(1)} pt gain this GW.`;
       }

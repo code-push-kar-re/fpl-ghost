@@ -191,3 +191,51 @@ def rival_squad(entry_id: int):
         return JSONResponse({"error": "No picks found"}, status_code=404)
 
     return _build_squad(picks, bootstrap, next_gw)
+
+
+# ── /api/player-pool ─────────────────────────────────────────────────────────
+# Returns all non-injured FPL players — used by the transfer simulator as candidates.
+
+@app.get("/api/player-pool")
+def player_pool():
+    try:
+        bootstrap = fpl_get("bootstrap-static/", timeout=10)
+    except Exception:
+        return JSONResponse({"error": "FPL API temporarily unreachable"}, status_code=503)
+
+    next_gw   = get_next_gw(bootstrap)
+    team_map  = {t["id"]: t["short_name"] for t in bootstrap.get("teams", [])}
+    players   = []
+
+    for p in bootstrap.get("elements", []):
+        status = p.get("status", "a")
+        if status not in ("a", "d"):          # skip injured / suspended / unavailable
+            continue
+
+        club = team_map.get(p.get("team", 0), "ARS")
+        if club not in _KNOWN_CLUBS:
+            club = "ARS"
+
+        ep_next = float(p.get("ep_next") or p.get("ep_this") or 0)
+        xp_by_gw = [
+            {"gw": next_gw + i, "xp": round(ep_next * max(0.5, 1.0 - i * 0.08), 2)}
+            for i in range(5)
+        ]
+
+        players.append({
+            "id":       f"p{p['id']}",
+            "name":     p.get("web_name", "Player"),
+            "first":    p.get("first_name", ""),
+            "club":     club,
+            "pos":      p.get("element_type", 4),
+            "price":    round(p.get("now_cost", 50) / 10.0, 1),
+            "proj":     round(ep_next, 2),
+            "form":     round(float(p.get("form") or 0), 1),
+            "selected": round(float(p.get("selected_by_percent") or 0), 1),
+            "status":   status,
+            "xpByGw":  xp_by_gw,
+        })
+
+    # Sort by projected points descending so the best candidates come first
+    players.sort(key=lambda x: x["proj"], reverse=True)
+    return players
