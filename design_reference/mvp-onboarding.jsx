@@ -252,14 +252,14 @@ function EnterStep({ onConnect }) {
     setErr('');
     try {
       const res = await fetch(`/api/onboard?team_id=${val}`);
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
         setErr(body.detail || `Couldn't find Team ID ${val}. Double-check and try again.`);
         return;
       }
-      onConnect(await res.json());
+      onConnect(body);
     } catch (_) {
-      setErr('Network error — is the server running?');
+      setErr('Could not reach the server. Make sure it\'s running on port 8000.');
     } finally {
       setLoading(false);
     }
