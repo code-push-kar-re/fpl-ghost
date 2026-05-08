@@ -1,0 +1,22 @@
+# Local dev files — not needed on Vercel
+web_server.py
+app.py
+config.py
+xp_engine.py
+fixture_engine.py
+optimizer.py
+solver.py
+fpl_api.py
+models.py
+team_xp.py
+ai_advisor.py
+pitch_view.py
+render.yaml
+requirements.txt
+__pycache__/
+*.pyc
+*.xlsx
+tests/
+.venv/
+.env
+design_reference/
